@@ -18,46 +18,69 @@ Original file is located at
 !pip install gradio
 
 import gradio as gr
-from transformers import BlipProcessor, BlipForConditionalGeneration
+from transformers import pipeline, BlipProcessor, BlipForConditionalGeneration
 from PIL import Image
+from google.colab import files
+from tqdm import tqdm
 import cv2
 import torch
 import os
-from tqdm import tqdm
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base").to(device)
+#processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+#model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
-def generate_caption(frame):
-    resized_frame = cv2.resize(frame, (224, 224))
-    pil_image = opencv_to_pil(resized_frame)
-    inputs = processor(pil_image, return_tensors="pt").to(device)
-    output = model.generate(**inputs)
-    caption = processor.decode(output[0], skip_special_tokens=True)
-    return caption
+def generate_caption(image):
+    #inputs = processor(images=image, return_tensors="pt")
+    #with torch.no_grad():
+     #   out = model.generate(**inputs)
+    #caption = processor.decode(out[0], skip_special_tokens=True)
+    #return
 
-def process_video(video_path, frame_interval=30):  # Process every nth frame
+    model = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
+    caption = model(image)
+    return caption[0]['generated_text']
+
+def process_video(video_path):
     cap = cv2.VideoCapture(video_path)
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    max_seconds = 60 # Process the first 3 seconds
-    frame_count = 0
-    captions = []
+    frame_rate = cap.get(cv2.CAP_PROP_FPS)
+    print(f"Frame rate: {frame_rate}")
 
-    while cap.isOpened() and frame_count < fps * max_seconds:
+    if not cap.isOpened():
+        print("Error: Could not open video file.")
+        return "Error: Could not open video file."
+    else:
+        print("Video file opened successfully.")
+
+    # Create a directory to save frames
+    try:
+        if not os.path.exists('data'):
+            os.makedirs('data')
+    except OSError:
+        print('Error: Creating directory of data')
+
+    frame_count = 0
+    captions = {}  # Dictionary to store frame number and caption
+
+    while True:
         ret, frame = cap.read()
         if not ret:
             break
+        if frame_count % 5 == 0:
+            frame_path = f'./data/frame{frame_count}.jpg'
+            print(f"Processing frame {frame_count}")
+            cv2.imwrite(frame_path, frame)
 
-        # Only process every nth frame
-        if frame_count % frame_interval == 0:
-            caption = generate_caption(frame)
-            captions.append(f"Frame {frame_count}: {caption}")
+            # Generate caption for the frame
+            image = Image.open(frame_path)
+            caption = generate_caption(image)
+            captions[frame_count] = caption
 
         frame_count += 1
 
     cap.release()
-    return "\n".join(captions)  # Return captions as a string
+    cv2.destroyAllWindows()
+
+    return f"Processed {frame_count} frames.\nCaptions: {captions}"
 
 with gr.Blocks() as interface:
     gr.Markdown("# Video Processor")
@@ -71,4 +94,4 @@ with gr.Blocks() as interface:
     process_button = gr.Button("Process Video")
     process_button.click(fn=process_video, inputs=video_input, outputs=output_text)
 
-interface.launch()
+interface.launch(debug=True)
